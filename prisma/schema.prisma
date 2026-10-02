@@ -1,0 +1,370 @@
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== AUTH ====================
+
+model User {
+  id            String       @id @default(cuid())
+  name          String?
+  email         String       @unique
+  password      String?
+  role          Role         @default(STUDENT)
+  avatar        String?
+  gamification  Boolean      @default(true)
+  preferredMode TutoringMode @default(AUTO)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  sessions        Session[]
+  submissions     ProblemSubmission[]
+  weaknesses      LearnerWeakness[]
+  recommendations Recommendation[]
+  resources       ResourceItem[]
+  uploads         UploadRecord[]
+  examAttempts    ExamAttempt[]
+  mockTests       MockTest[]
+  adminLogs       AdminActionLog[]
+  emailVerified   Boolean             @default(false)
+  image           String?
+  accounts        Account[]
+  feedbacks       Feedback[]
+
+  @@map("user")
+}
+
+enum Role {
+  STUDENT
+  TEACHER
+  ADMIN
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+
+  @@index([userId])
+  @@map("session")
+}
+
+// ==================== TAXONOMY ====================
+
+model Topic {
+  id          String   @id @default(cuid())
+  name        String
+  nameVi      String?
+  slug        String   @unique
+  description String?
+  chapter     Int?
+  order       Int      @default(0)
+  parentId    String?
+  parent      Topic?   @relation("TopicHierarchy", fields: [parentId], references: [id])
+  children    Topic[]  @relation("TopicHierarchy")
+  createdAt   DateTime @default(now())
+
+  subtopics   Subtopic[]
+  questions   ExamQuestion[]
+  submissions ProblemSubmission[]
+  weaknesses  LearnerWeakness[]
+  resources   ResourceItem[]
+}
+
+model Subtopic {
+  id      String  @id @default(cuid())
+  name    String
+  nameVi  String?
+  slug    String  @unique
+  topicId String
+  order   Int     @default(0)
+  topic   Topic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  concepts Concept[]
+}
+
+model Concept {
+  id          String   @id @default(cuid())
+  name        String
+  nameVi      String?
+  description String?
+  formulas    String[] @default([])
+  subtopicId  String
+  subtopic    Subtopic @relation(fields: [subtopicId], references: [id], onDelete: Cascade)
+}
+
+// ==================== TUTORING ====================
+
+model ProblemSubmission {
+  id           String       @id @default(cuid())
+  userId       String
+  topicId      String?
+  questionText String
+  imageUrl     String?
+  documentUrl  String?
+  mode         TutoringMode
+  status       String       @default("active")
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic     Topic?       @relation(fields: [topicId], references: [id])
+  responses AIResponse[]
+}
+
+enum TutoringMode {
+  HINT
+  CONCEPT
+  GUIDED
+  FULL_SOLUTION
+  AUTO
+}
+
+model AIResponse {
+  id           String       @id @default(cuid())
+  submissionId String
+  responseText String
+  mode         TutoringMode
+  confidence   Float?
+  stepNumber   Int          @default(1)
+  isGrounded   Boolean      @default(true)
+  metadata     Json?
+  createdAt    DateTime     @default(now())
+
+  submission ProblemSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+}
+
+// ==================== LEARNER MEMORY ====================
+
+model LearnerWeakness {
+  id          String   @id @default(cuid())
+  userId      String
+  topicId     String
+  category    String?
+  severity    Float    @default(0.5)
+  occurrences Int      @default(1)
+  details     String?
+  lastSeen    DateTime @default(now())
+  resolved    Boolean  @default(false)
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic Topic @relation(fields: [topicId], references: [id])
+
+  @@unique([userId, topicId, category])
+}
+
+model Recommendation {
+  id          String   @id @default(cuid())
+  userId      String
+  type        String
+  title       String
+  description String
+  priority    Int      @default(0)
+  dismissed   Boolean  @default(false)
+  actionUrl   String?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ==================== LIBRARY ====================
+
+model ResourceItem {
+  id          String   @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  fileUrl     String?
+  fileType    String?
+  fileSize    Int?
+  topicId     String?
+  category    String?
+  tags        String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic Topic? @relation(fields: [topicId], references: [id])
+}
+
+model UploadRecord {
+  id        String   @id @default(cuid())
+  userId    String
+  fileName  String
+  filePath  String
+  fileType  String
+  fileSize  Int
+  status    String   @default("uploaded")
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ==================== EXAM BANK ====================
+
+model ExamQuestion {
+  id            String       @id @default(cuid())
+  topicId       String
+  questionText  String
+  questionImage String?
+  options       Json?
+  correctAnswer String
+  explanation   String?
+  difficulty    Difficulty   @default(MEDIUM)
+  type          QuestionType @default(MULTIPLE_CHOICE)
+  source        String?
+  tags          String[]     @default([])
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  topic         Topic          @relation(fields: [topicId], references: [id])
+  attempts      ExamAttempt[]
+  mockTestItems MockTestItem[]
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+  EXPERT
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  SHORT_ANSWER
+  CALCULATION
+  TRUE_FALSE
+}
+
+model ExamAttempt {
+  id             String   @id @default(cuid())
+  userId         String
+  questionId     String
+  selectedAnswer String?
+  isCorrect      Boolean
+  timeSpent      Int?
+  createdAt      DateTime @default(now())
+
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question ExamQuestion @relation(fields: [questionId], references: [id])
+}
+
+// ==================== MOCK TESTS ====================
+
+model MockTest {
+  id             String     @id @default(cuid())
+  userId         String
+  title          String
+  topicFocus     String?
+  difficulty     Difficulty @default(MEDIUM)
+  totalQuestions Int
+  score          Float?
+  timeLimit      Int?
+  completedAt    DateTime?
+  createdAt      DateTime   @default(now())
+
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items MockTestItem[]
+}
+
+model MockTestItem {
+  id             String   @id @default(cuid())
+  mockTestId     String
+  questionId     String
+  order          Int
+  selectedAnswer String?
+  isCorrect      Boolean?
+  timeSpent      Int?
+
+  mockTest MockTest     @relation(fields: [mockTestId], references: [id], onDelete: Cascade)
+  question ExamQuestion @relation(fields: [questionId], references: [id])
+}
+
+// ==================== KNOWLEDGE BASE ====================
+
+model TeacherApprovedSource {
+  id         String   @id @default(cuid())
+  title      String
+  content    String
+  topicArea  String?
+  sourceType String
+  verified   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ==================== ADMIN ====================
+
+model AdminActionLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  target    String
+  details   Json?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+// ==================== FEEDBACK ====================
+
+model Feedback {
+  id            String   @id @default(cuid())
+  userId        String
+  grade         String   @default("12")
+  category      String   @default("general")
+  message       String
+  ratingOverall Int      @default(5)
+  ratingUI      Int      @default(0)
+  ratingContent Int      @default(0)
+  ratingAI      Int      @default(0)
+  ratingUX      Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("feedback")
+}
